@@ -6,7 +6,7 @@
 
 NexaFi is a revolutionary AI-powered financial operating system that transforms how small and mid-sized businesses (SMBs) manage their financial operations through deep integration of advanced artificial intelligence, distributed ledger technology, and automated financial workflows.
 
-![NexaFi Dashboard](docs/images/dashboard.bmp)
+![NexaFi HomePage](docs/images/homepage.bmp)
 
 ## Table of Contents
 
