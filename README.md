@@ -1,322 +1,263 @@
-# NexaFi - Enterprise-Grade AI-Driven Fintech Platform
+# NexaFi
 
-![CI/CD Status](https://img.shields.io/github/actions/workflow/status/quantsingularity/NexaFi/cicd.yml?branch=main&label=CI/CD&logo=github)
-[![Test Coverage](https://img.shields.io/badge/coverage-82%25-brightgreen)](https://github.com/quantsingularity/NexaFi/tests)
-[![License](https://img.shields.io/badge/License-MIT-blue)](https://github.com/quantsingularity/NexaFi/LICENSE)
+![CI/CD Status](https://img.shields.io/github/actions/workflow/status/quantsingularity/NexaFi/cicd.yml?branch=main&label=CI%2FCD&logo=github)
 
-NexaFi is a revolutionary AI-powered financial operating system that transforms how small and mid-sized businesses (SMBs) manage their financial operations through deep integration of advanced artificial intelligence, distributed ledger technology, and automated financial workflows.
+## AI-Driven Fintech Platform for SMBs
 
-![NexaFi HomePage](docs/images/homepage.bmp)
+NexaFi is a financial operating system for small and mid-sized businesses: ten genuinely separate Flask microservices (gateway, auth, ledger, payment, credit, document, compliance, notification, open banking, and user), each independently runnable, communicating over synchronous HTTP through the gateway rather than an async message bus. A real RabbitMQ client library exists but isn't currently used by any service. Two frontends (both React and Vite, despite one being named "mobile-frontend") complete the application.
+
+<div align="center">
+  <img src="docs/images/homepage.bmp" alt="NexaFi HomePage" width="100%">
+</div>
 
 ## Table of Contents
 
 - [Overview](#overview)
 - [Project Structure](#project-structure)
-- [Core Value Proposition](#core-value-proposition)
-- [Key Features](#key-features)
+- [Feature Status](#feature-status)
 - [Technology Stack](#technology-stack)
-- [Technical Architecture](#technical-architecture)
-- [Installation & Setup](#installation--setup)
+- [Architecture](#architecture)
+- [Installation and Setup](#installation-and-setup)
+- [Running the Stack](#running-the-stack)
+- [API Surface](#api-surface)
 - [Testing](#testing)
 - [CI/CD Pipeline](#cicd-pipeline)
 - [Documentation](#documentation)
-- [Contributing Guidelines](#contributing-guidelines)
+- [Contributing](#contributing)
 - [License](#license)
-
----
 
 ## Overview
 
-NexaFi is an AI-first fintech operating system for SMBs that unifies accounting, payments, lending, analytics, and advisory into one platform. It automates workflows, learns from business data to deliver predictive insights and personalized guidance, and embeds finance into daily operations via deep APIs.
-
----
+NexaFi demonstrates a fintech operating system across a real, runnable set of microservices. Cash-flow forecasting (Gradient Boosting) trains on real caller-supplied transaction history when there's enough of it, with a synthetic seasonal fallback for businesses with no history yet. Credit scoring (Random Forest) and transaction anomaly detection work differently: the credit model is trained entirely on synthetic, self-generated data with no real credit outcomes involved, and the anomaly detector is a deterministic statistical and rules engine (z-scores, velocity checks, time-of-day risk) rather than a trained unsupervised model. Real SAP and Oracle integration clients exist, with genuine OAuth2/SAML flows against real SAP OData endpoints, but neither is called by any of the ten backend services yet.
 
 ## Project Structure
 
-The project is organized into several main components:
-
 ```
 NexaFi/
-├── code/                   # Core backend logic, services, and shared utilities
-├── docs/                   # Project documentation
-├── infrastructure/         # DevOps, deployment, and infra-related code
-├── mobile-frontend/        # Mobile application
-├── web-frontend/           # Web dashboard
-├── scripts/                # Automation, setup, and utility scripts
-├── LICENSE                 # License information
-└── README.md               # Project overview and instructions
+├── code/
+│   ├── backend/                      # Ten independent Flask microservices
+│   │   ├── api-gateway/              # Routes requests to the other services over HTTP
+│   │   ├── auth-service/             # JWT auth, MFA
+│   │   ├── user-service/             # User profiles
+│   │   ├── ledger-service/           # Accounting, transactions
+│   │   ├── payment-service/          # Payment processing
+│   │   ├── credit-service/           # Underwriting, lending
+│   │   ├── document-service/         # OCR, document parsing
+│   │   ├── compliance-service/       # Compliance checks (not containerized by default)
+│   │   ├── notification-service/     # Notifications (not containerized by default)
+│   │   ├── open-banking-gateway/     # Open banking (not containerized by default)
+│   │   └── shared/                   # Config, middleware, a RabbitMQ client (unused), utils
+│   ├── ml_services/
+│   │   ├── ai-service/               # CashFlowForecaster, CreditScorer, TransactionAnomalyDetector
+│   │   └── analytics-service/        # Business intelligence and reporting
+│   └── platform_services/
+│       ├── enterprise-integrations/  # Real SAP and Oracle clients (not wired to a live endpoint)
+│       ├── scalability/              # Caching, distributed-computing helpers
+│       └── security/                 # Threat detection, zero-trust helpers
+├── web-frontend/                     # React (Vite) dashboard
+├── mobile-frontend/                  # A second React (Vite) app, not React Native or Expo
+├── infrastructure/                   # Docker, Kubernetes, Helm, Terraform, Ansible, monitoring
+├── scripts/                          # Setup, run, stop, build, lint, and test scripts
+├── docs/                             # Documentation (this directory)
+└── README.md
 ```
 
----
+## Feature Status
 
-## Core Value Proposition
+### Application tier (wired and tested)
 
-NexaFi delivers transformative value through a set of key differentiators, focusing on an AI-first approach and a unified ecosystem:
+| Component                         | Details                                                                                                                                                                                                                                                            |
+| :-------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Ten independent services**      | api-gateway, auth-service, user-service, ledger-service, payment-service, credit-service, document-service, compliance-service, notification-service, and open-banking-gateway, each a separate Flask app with its own `main.py`.                                  |
+| **Auth**                          | JWT sessions and an MFA module in `auth-service`. Its `SECRET_KEY` falls back to a static placeholder value with no check that rejects it in production.                                                                                                           |
+| **Service-to-service calls**      | The API gateway forwards requests to the other services synchronously over HTTP (`requests.get`/`requests.post`), not through an async message bus.                                                                                                                |
+| **Cash-flow forecasting**         | A `GradientBoostingRegressor` that builds features from the caller's own recent daily cash flows when at least a week of history is supplied, falling back to a synthetic seasonal series (trend plus weekly cycle plus noise) for businesses with no history yet. |
+| **Transaction anomaly detection** | A deterministic statistical and rules engine, not a trained model: per-user z-scores on transaction amount, a velocity check, and time-of-day risk factors, combined into a 0 to 1 anomaly score.                                                                  |
+| **Web dashboard**                 | React 19 app (plain JavaScript, Vite, Tailwind CSS v4), covering the core dashboard, ledger, payments, credit, and settings screens.                                                                                                                               |
+| **"Mobile" frontend**             | A second React 19 and Vite app (also plain JavaScript, also Tailwind CSS v4), not a React Native or Expo project.                                                                                                                                                  |
 
-| Differentiator                      | Description                                                                                                             |
-| :---------------------------------- | :---------------------------------------------------------------------------------------------------------------------- |
-| **AI-First Architecture**           | Built from the ground up with artificial intelligence as the core technology, not merely as an add-on feature.          |
-| **Unified Financial Ecosystem**     | Eliminates the need for multiple disconnected tools by providing a comprehensive platform for all financial operations. |
-| **Embedded Financial Intelligence** | Delivers contextual insights and automation directly within business workflows.                                         |
-| **Adaptive Learning System**        | Continuously improves through proprietary machine learning algorithms that analyze business-specific patterns.          |
-| **Enterprise-Grade Security**       | Implements bank-level security protocols with advanced fraud detection and prevention mechanisms.                       |
-| **Scalable Infrastructure**         | Designed to grow seamlessly from small businesses to enterprise-level operations without performance degradation.       |
+### Research tier (library modules, not wired to a live endpoint)
 
----
-
-## Key Features
-
-NexaFi's core functionality is organized into five intelligent domains, each leveraging AI for maximum efficiency and insight.
-
-### Advanced Financial Management & Accounting
-
-| Feature                                    | Description                                                                                                                                                                                        |
-| :----------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Neural-Network Powered Bookkeeping**     | Utilizes deep learning models to parse invoices, receipts, and bank feeds with **99.7% accuracy**, automatically reconciling accounts and generating real-time financial statements.               |
-| **Predictive Cash-Flow Engine**            | Employs ensemble machine learning models to forecast future cash flow with **92% accuracy** up to 90 days out, alerting businesses to funding gaps or surpluses with specific recommended actions. |
-| **Intelligent Transaction Categorization** | Implements transfer learning techniques to automatically classify transactions with continuous improvement from minimal corrections.                                                               |
-| **Automated Financial Reporting**          | Generates comprehensive financial reports (balance sheets, income statements, cash flow statements) with customizable templates and regulatory compliance checks.                                  |
-
-### Next-Generation Payment Infrastructure
-
-| Feature                             | Description                                                                                                                                                   |
-| :---------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Embedded Payment Processing**     | Seamlessly accept multiple payment methods (cards, ACH, real-time payments, cryptocurrencies) directly within NexaFi without third-party redirects.           |
-| **Multi-Currency Management**       | Sophisticated FX engine for managing wallets in 135+ currencies with AI-optimized exchange timing for competitive rates.                                      |
-| **Dynamic Yield Optimization**      | Algorithmic treasury management that automatically allocates idle funds across various instruments to maximize returns while maintaining necessary liquidity. |
-| **Subscription Revenue Management** | Advanced recurring billing system with cohort analysis, churn prediction, and revenue optimization suggestions.                                               |
-
-### Conversational AI Advisory System
-
-| Feature                               | Description                                                                                                                                                      |
-| :------------------------------------ | :--------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Context-Aware Financial Assistant** | Transformer-based LLM fine-tuned on financial regulations and best practices, providing personalized advice on tax, compliance, investment, and cash-management. |
-| **Proactive Intelligence**            | Identifies patterns and anomalies to deliver actionable recommendations before issues arise.                                                                     |
-| **Document Understanding System**     | Advanced OCR and NLP capabilities to extract, interpret, and summarize financial information from contracts, statements, and regulatory documents.               |
-| **Tax Strategy Optimization**         | Continuously monitors transactions and business activities to identify potential deductions and tax-saving opportunities with compliance verification.           |
-
-### Algorithmic Credit & Lending Platform
-
-| Feature                               | Description                                                                                                                                                            |
-| :------------------------------------ | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Alternative Data Underwriting**     | Proprietary credit scoring algorithm utilizing **1,000+ data points** beyond traditional credit metrics to match businesses with optimal financing in under 3 seconds. |
-| **Dynamic Credit Line Management**    | Self-adjusting credit facilities that automatically scale based on real-time business performance indicators and market conditions.                                    |
-| **Integrated Repayment Optimization** | Smart loan servicing that integrates with cash flow management to recommend optimal repayment timing and amounts.                                                      |
-
-### Advanced Analytics & Business Intelligence
-
-| Feature                              | Description                                                                                                                                                         |
-| :----------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Multi-dimensional Benchmarking**   | Anonymous performance comparison against industry peers across **50+ KPIs** with statistical significance testing.                                                  |
-| **Real-time Anomaly Detection**      | Utilizes unsupervised learning to identify unusual transactions or patterns with **99.2% precision** and minimal false positives.                                   |
-| **Interactive Trend Visualization**  | Dynamic, drill-down capable dashboards presenting financial trends with predictive modeling and scenario analysis.                                                  |
-| **Prescriptive Optimization Engine** | AI-generated, statistically validated recommendations for pricing, inventory management, staffing, and other operational decisions with projected ROI calculations. |
-
----
+| Component                  | Details                                                                                                                                                                                                  |
+| :------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Credit scoring**         | A `RandomForestClassifier` trained entirely on synthetic, self-generated data: both the features and the labels come from a hand-written synthetic generator, with no real credit-outcome data involved. |
+| **SAP integration**        | A real client with OAuth2 and SAML token flows against genuine SAP OData endpoints (for example `API_BUSINESS_PARTNER`); not imported by any of the ten backend services.                                |
+| **Oracle integration**     | A comparable Oracle client, also not imported by any backend service.                                                                                                                                    |
+| **RabbitMQ message queue** | A working `pika`-based publish and consume client in `shared/utils/message_queue.py`; not imported anywhere else in the codebase, despite RabbitMQ running as a container in Docker Compose.             |
 
 ## Technology Stack
 
-NexaFi is built on a modern, cloud-native stack optimized for high performance, scalability, and data-intensive financial operations.
+| Area                              | Technology                                                                        |
+| :-------------------------------- | :-------------------------------------------------------------------------------- |
+| Backend services                  | Python 3.11+, Flask, one Flask app per microservice                               |
+| Auth                              | PyJWT, an in-house MFA module                                                     |
+| Data layer                        | SQLAlchemy, PostgreSQL, Redis (caching)                                           |
+| Messaging (library, unused)       | RabbitMQ (pika)                                                                   |
+| ML                                | scikit-learn (Gradient Boosting, Random Forest, Ridge), NumPy                     |
+| Enterprise integrations (library) | Real SAP (OAuth2/SAML) and Oracle clients, not called by any live service         |
+| Web frontend                      | React 19, JavaScript, Vite, Tailwind CSS v4                                       |
+| "Mobile" frontend                 | React 19, JavaScript, Vite, Tailwind CSS v4 (a second web app, not native mobile) |
+| Infrastructure                    | Docker, Docker Compose, Kubernetes, Helm, Terraform, Ansible                      |
+| Monitoring                        | Elasticsearch, Kibana                                                             |
+| CI/CD                             | GitHub Actions                                                                    |
+| Testing                           | pytest (backend, ml_services, platform_services), Vitest (web and mobile)         |
 
-| Category     | Component        | Technology           | Detail                                                                      |
-| :----------- | :--------------- | :------------------- | :-------------------------------------------------------------------------- |
-| **Backend**  | Languages        | Python               | Primary language for all microservices and AI/ML components.                |
-|              | Frameworks       | Flask                | Used for building REST API endpoints across all microservices.              |
-| **Frontend** | Web              | React, TypeScript    | Main framework for the web dashboard.                                       |
-|              | Mobile           | React Native         | For cross-platform (iOS/Android) mobile application development.            |
-|              | Styling          | Tailwind CSS         | Utility-first CSS framework for rapid and consistent UI development.        |
-| **AI/ML**    | Frameworks       | PyTorch, TensorFlow  | For training and deploying deep learning models (e.g., Neural Bookkeeping). |
-|              | Tools            | Scikit-learn, Pandas | For traditional ML, data processing, and feature engineering.               |
-| **DevOps**   | Containerization | Docker               | For packaging services and ensuring environment consistency.                |
-|              | Orchestration    | Kubernetes           | Designed for scalable deployment and management of microservices.           |
-|              | CI/CD            | GitHub Actions       | Automated build, test, and deployment pipelines.                            |
-
----
-
-## Technical Architecture
-
-NexaFi employs a **Microservices Architecture** with an **Event-Driven Design** to ensure maximum decoupling, resilience, and scalability. The system is divided into independent, domain-specific services communicating primarily through an asynchronous message bus.
+## Architecture
 
 ```
-NexaFi/
-├── API Gateway (Authentication, Rate Limiting)
-├── Frontend Applications
-│   ├── Web Dashboard (React/TS)
-│   └── Mobile App (React Native)
-├── Core Microservices
-│   ├── User Service (Auth, Profile)
-│   ├── Ledger Service (Accounting, Transactions)
-│   ├── Payment Service (Processing, FX)
-│   ├── Credit Service (Underwriting, Lending)
-│   ├── Document Service (OCR, NLP)
-│   └── Analytics Service (BI, Reporting)
-├── AI/ML Engine
-│   ├── AI Service (Forecasting, Advisory LLM)
-│   └── Anomaly Detection Engine
-├── Shared Infrastructure
-│   ├── Message Queue (Kafka/RabbitMQ)
-│   ├── Distributed Cache (Redis)
-│   ├── Audit & Logging Service
-│   └── Open Banking Gateway
-└── Enterprise Integration Layer
-    ├── SAP Integration
-    └── Oracle Integration
+Clients
+  ├── web-frontend (React, Vite)          ── HTTP/JSON ──┐
+  └── mobile-frontend (React, Vite)      ── HTTP/JSON ──┤
+                                                        ▼
+API Gateway (Flask)
+  Forwards requests synchronously (requests.get/post) to:
+  auth-service · user-service · ledger-service · payment-service
+  credit-service · document-service · compliance-service
+  notification-service · open-banking-gateway
+
+AI service (code/ml_services/ai-service)
+  CashFlowForecaster (Gradient Boosting, real data + synthetic fallback)
+  CreditScorer (Random Forest, fully synthetic training data)
+  TransactionAnomalyDetector (statistical rules engine)
+
+Platform services (code/platform_services)
+  SAP and Oracle integration clients (real, not wired to a live endpoint)
+
+Data layer
+  PostgreSQL · Redis · RabbitMQ (container runs; no service currently publishes to it)
 ```
 
----
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detail.
 
-## Installation & Setup
+## Installation and Setup
 
-The recommended way to set up NexaFi for development is using the provided setup script, which handles dependency installation and environment configuration.
-
-### Prerequisites
-
-| Requirement | Detail                                                                         |
-| :---------- | :----------------------------------------------------------------------------- |
-| **Python**  | 3.10+                                                                          |
-| **Node.js** | 18+                                                                            |
-| **pnpm**    | Package manager for frontend dependencies.                                     |
-| **Docker**  | Docker Engine and Docker Compose for running the microservices infrastructure. |
-
-### Quick Start
-
-The `setup.sh` script automates the installation of system dependencies (Docker) and project dependencies (Python, Node.js).
+Prerequisites: Python 3.11+, Node.js 18+, pnpm, and Docker.
 
 ```bash
-# Clone the repository
 git clone https://github.com/quantsingularity/NexaFi.git
 cd NexaFi
 
-# Run the setup script
-# This script will install Docker, Python dependencies, and frontend dependencies
-./scripts/setup.sh
+# Backend: each service has its own virtual environment
+for service_dir in code/backend/*/; do
+  if [ -f "${service_dir}requirements.txt" ]; then
+    (cd "$service_dir" && python3 -m venv venv && source venv/bin/activate \
+      && pip install -r requirements.txt && deactivate)
+  fi
+done
 
-# Start the entire application using Docker Compose
-# This will launch all backend microservices and the database infrastructure
-docker-compose -f backend/infrastructure/docker-compose.yml up -d
+# Web frontend
+cd web-frontend && pnpm install && cd ..
 
-# Run the web frontend (in a separate terminal)
-cd web-frontend
-pnpm start
+# "Mobile" frontend
+cd mobile-frontend && pnpm install && cd ..
 ```
 
-### Manual Setup (Backend)
+For an automated setup:
 
-1.  **Install Python Dependencies:**
-    ```bash
-    for service_dir in backend/*/; do
-      if [ -f "${service_dir}requirements.txt" ]; then
-        echo "Installing dependencies for ${service_dir}..."
-        cd "${service_dir}"
-        python3 -m venv venv
-        source venv/bin/activate
-        pip install -r requirements.txt
-        deactivate
-        cd ../..
-      fi
-    done
-    ```
-2.  **Start Infrastructure:**
-    ```bash
-    cd backend/infrastructure
-    ./start-infrastructure.sh
-    # Or using Docker Compose:
-    docker-compose up -d
-    ```
+```bash
+git clone https://github.com/quantsingularity/NexaFi.git
+cd NexaFi
+./scripts/setup.sh
+./scripts/run.sh
+```
 
-### Manual Setup (Frontend)
+`scripts/setup.sh` also installs Docker if it isn't already present, so it may prompt for `sudo`.
 
-1.  **Install pnpm:**
-    ```bash
-    npm install -g pnpm
-    ```
-2.  **Install Dependencies and Run:**
-    ```bash
-    cd web-frontend
-    pnpm install
-    pnpm run dev
-    ```
+Full, environment-specific instructions are in [docs/INSTALLATION.md](docs/INSTALLATION.md).
 
----
+## Running the Stack
 
-## AI/ML Model Performance
+```bash
+# 1) Full stack, including Postgres, Redis, RabbitMQ, Elasticsearch, and every
+#    containerized service (from infrastructure/)
+./start-infrastructure.sh
+# or
+docker compose up -d
 
-NexaFi's ML models are validated through rigorous walk-forward cross-validation.
-Full validation methodology in **[docs/ML_MODEL_PERFORMANCE.md](docs/ML_MODEL_PERFORMANCE.md)**.
+# 2) Web dashboard (from web-frontend)
+pnpm run dev
 
-| Model                          | Key Metric       | Validated Value |
-| ------------------------------ | ---------------- | --------------- |
-| Cash-Flow Forecasting (GBM)    | 7-day MAPE       | 8.7 %           |
-| Cash-Flow Forecasting (GBM)    | 90 % CI Coverage | 90.5 %          |
-| Credit Scoring (Random Forest) | AUC-ROC          | 0.913           |
-| Credit Scoring (Random Forest) | F1 Score         | 88.0 %          |
-| Anomaly / Fraud Detection      | AUC-ROC          | 0.962           |
-| Anomaly / Fraud Detection      | Precision @ 0.5  | 94.3 %          |
+# 3) "Mobile" frontend (from mobile-frontend)
+pnpm run dev
+```
 
-All models pass statistical significance tests (p < 0.05) vs naïve baselines.
+`compliance-service`, `notification-service`, and `open-banking-gateway` are not containers in the default Docker Compose file; run them directly from their own directories (`python src/main.py`) if you need them locally.
+
+See [docs/USAGE.md](docs/USAGE.md) and [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+
+## API Surface
+
+Each service exposes its own `/health` check. The gateway is the single entry point for clients.
+
+| Service                       | What it's for                                               |
+| :---------------------------- | :---------------------------------------------------------- |
+| api-gateway                   | Single entry point; forwards requests to the other services |
+| auth-service                  | Login, session refresh, MFA                                 |
+| user-service                  | User profile management                                     |
+| ledger-service                | Accounts, transactions, journal entries                     |
+| payment-service               | Payment processing                                          |
+| credit-service                | Credit scoring and lending workflows                        |
+| document-service              | Document upload and parsing                                 |
+| compliance-service            | Compliance checks and reporting                             |
+| notification-service          | Notifications                                               |
+| open-banking-gateway          | Open banking account linking                                |
+| ai-service (code/ml_services) | Cash-flow forecasting, credit scoring, anomaly detection    |
+
+Full request and response shapes are in [docs/API.md](docs/API.md).
 
 ## Testing
 
-NexaFi employs a rigorous testing strategy to ensure reliability, performance, and security, with a current test coverage of **82%**.
+```bash
+# Any backend service (from its own directory, venv active)
+pytest
 
-| Test Type                  | Location             | Purpose                                                                             |
-| :------------------------- | :------------------- | :---------------------------------------------------------------------------------- |
-| **Unit Tests**             | `tests/unit/`        | Verify individual functions and components in isolation.                            |
-| **Integration Tests**      | `tests/integration/` | Validate communication and data flow between microservices.                         |
-| **End-to-End (E2E) Tests** | `tests/e2e/`         | Simulate real user scenarios across the entire application stack (web and mobile).  |
-| **Performance Tests**      | `tests/performance/` | Benchmark system latency and throughput using tools like Locust.                    |
-| **Security Tests**         | `tests/security/`    | Automated checks for common vulnerabilities and compliance with security standards. |
+# All backend, ml_services, and platform_services tests, via the project script
+./scripts/test_all.sh
 
----
+# Web (from web-frontend)
+pnpm test
+
+# "Mobile" frontend (from mobile-frontend)
+pnpm test
+```
+
+`code/backend/tests` has 7 files, `code/ml_services/tests` and `code/platform_services/tests` each have 1. The web dashboard has 5 test files (Vitest), and the mobile-frontend Vite app has 8.
 
 ## CI/CD Pipeline
 
-BlockScore uses GitHub Actions for continuous integration and deployment:
+GitHub Actions (`.github/workflows/cicd.yml`) runs three jobs on push, pull request, and manual dispatch:
 
-| Stage                | Control Area                    | Institutional-Grade Detail                                                              |
-| :------------------- | :------------------------------ | :-------------------------------------------------------------------------------------- |
-| **Formatting Check** | Change Triggers                 | Enforced on all `push` and `pull_request` events to `main` and `develop`                |
-|                      | Manual Oversight                | On-demand execution via controlled `workflow_dispatch`                                  |
-|                      | Source Integrity                | Full repository checkout with complete Git history for auditability                     |
-|                      | Python Runtime Standardization  | Python 3.10 with deterministic dependency caching                                       |
-|                      | Backend Code Hygiene            | `autoflake` to detect unused imports/variables using non-mutating diff-based validation |
-|                      | Backend Style Compliance        | `black --check` to enforce institutional formatting standards                           |
-|                      | Non-Intrusive Validation        | Temporary workspace comparison to prevent unauthorized source modification              |
-|                      | Node.js Runtime Control         | Node.js 18 with locked dependency installation via `npm ci`                             |
-|                      | Web Frontend Formatting Control | Prettier checks for web-facing assets                                                   |
-|                      | Mobile Frontend Formatting      | Prettier enforcement for mobile application codebases                                   |
-|                      | Documentation Governance        | Repository-wide Markdown formatting enforcement                                         |
-|                      | Infrastructure Configuration    | Prettier validation for YAML/YML infrastructure definitions                             |
-|                      | Compliance Gate                 | Any formatting deviation fails the pipeline and blocks merge                            |
+| Job                 | Depends on          | What it does                                                                                   |
+| :------------------ | :------------------ | :--------------------------------------------------------------------------------------------- |
+| Code Quality Checks | -                   | Python formatter checks (autoflake, black) and a repository-wide Prettier check                |
+| Backend Tests       | Code Quality Checks | Runs the pytest suite with coverage and uploads the coverage report as an artifact             |
+| Web Build           | Code Quality Checks | Installs dependencies and produces the production build for `web-frontend` only (no test step) |
+
+There is currently no CI job that builds or tests `mobile-frontend`, `ml_services`, or `platform_services`.
 
 ## Documentation
 
-| Document                    | Path                 | Description                                                            |
-| :-------------------------- | :------------------- | :--------------------------------------------------------------------- |
-| **README**                  | `README.md`          | High-level overview, project scope, and repository entry point         |
-| **Installation Guide**      | `INSTALLATION.md`    | Step-by-step installation and environment setup                        |
-| **API Reference**           | `API.md`             | Detailed documentation for all API endpoints                           |
-| **CLI Reference**           | `CLI.md`             | Command-line interface usage, commands, and examples                   |
-| **User Guide**              | `USAGE.md`           | Comprehensive end-user guide, workflows, and examples                  |
-| **Architecture Overview**   | `ARCHITECTURE.md`    | System architecture, components, and design rationale                  |
-| **Configuration Guide**     | `CONFIGURATION.md`   | Configuration options, environment variables, and tuning               |
-| **Feature Matrix**          | `FEATURE_MATRIX.md`  | Feature coverage, capabilities, and roadmap alignment                  |
-| **Security Guide**          | `SECURITY.md`        | Security model, threat assumptions, and responsible disclosure process |
-| **Contributing Guidelines** | `CONTRIBUTING.md`    | Contribution workflow, coding standards, and PR requirements           |
-| **Troubleshooting**         | `TROUBLESHOOTING.md` | Common issues, diagnostics, and remediation steps                      |
+| Document                                                     | Contents                                |
+| :----------------------------------------------------------- | :-------------------------------------- |
+| [docs/README.md](docs/README.md)                             | Documentation index                     |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)                 | System architecture                     |
+| [docs/API.md](docs/API.md)                                   | REST API reference                      |
+| [docs/INSTALLATION.md](docs/INSTALLATION.md)                 | Setup for all components                |
+| [docs/CONFIGURATION.md](docs/CONFIGURATION.md)               | Environment variables and config        |
+| [docs/USAGE.md](docs/USAGE.md)                               | Running and using the platform          |
+| [docs/CLI.md](docs/CLI.md)                                   | Helper scripts reference                |
+| [docs/FEATURE_MATRIX.md](docs/FEATURE_MATRIX.md)             | Feature status, implemented vs planned  |
+| [docs/ML_MODEL_PERFORMANCE.md](docs/ML_MODEL_PERFORMANCE.md) | Model design and validation methodology |
+| [docs/PERFORMANCE.md](docs/PERFORMANCE.md)                   | System performance notes                |
+| [docs/SECURITY.md](docs/SECURITY.md)                         | Security model and disclosure process   |
+| [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)           | Common issues and fixes                 |
+| [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)                 | Contribution guide                      |
+| [docs/EXAMPLES/](docs/EXAMPLES/)                             | Worked examples                         |
 
-## Contributing Guidelines
+## Contributing
 
-We welcome contributions to NexaFi. Please follow these guidelines to ensure a smooth and effective collaboration:
-
-1.  **Open an Issue:** Before starting work, open an issue to discuss your proposed feature or bug fix.
-2.  **Fork and Branch:** Fork the repository and create a new branch for your changes.
-3.  **Code Standards:** Adhere to the existing code style and ensure all tests pass.
-4.  **Documentation:** Update the relevant documentation for any new features or changes.
-5.  **Pull Request:** Submit a pull request with a clear description of your changes and reference the related issue.
-
----
+See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).
 
 ## License
 
-NexaFi is released under the **MIT License**. For full details, see the [LICENSE](LICENSE) file in the repository root.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
